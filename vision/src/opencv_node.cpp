@@ -7,6 +7,12 @@
 #include "CMT.h"
 #include "hough.h"
 
+#include "mavros_msgs/SetMode.h"
+#include "mavros_msgs/CommandBool.h"
+#include "ark_msgs/PidErrors.h"
+#include <std_msgs/Float64.h>
+
+
 #include "std_msgs/String.h"
 #include "std_msgs/Empty.h"
 
@@ -84,6 +90,10 @@ class ImageConverter
   image_transport::ImageTransport it_;
   image_transport::Subscriber image_sub_;
   image_transport::Publisher image_pub_;
+
+    ros::NodeHandle nh_;
+    ros::Publisher pid_pub;
+    ros::Subscriber alt_sub;
   
 public:
   ImageConverter()
@@ -105,9 +115,32 @@ public:
   {
     
   }
+    AltHold()
+    {
+        pid_pub = nh_.advertise<ark_msgs::PidErrors>("/ark/pid_errors", 1000);
+        alt_sub = nh_.subscribe("/mavros/global_position/rel_alt", 1000, &AltHold::altCb, this);
+        target_height = 0;      
+    }
+    ~AltHold()
+    {
+    } 
 
-  void imageCb(const sensor_msgs::ImageConstPtr& msg)
-  {
+ //callback function to store altitude in variable 'current_altitude'
+
+    void altCb(const std_msgs::Float64::ConstPtr& msg)            //ALTITUDE
+    {
+        float current_altitude = msg->data;
+        float diff = current_altitude - target_height;
+
+        ark_msgs::PidErrors pid_error;
+        pid_error.dz = diff;
+        pid_pub.publish(pid_error);
+
+        ROS_INFO("%.2f", diff);
+    }   
+
+    void imageCb(const sensor_msgs::ImageConstPtr& msg)      //IMAGE
+   {
     cv_bridge::CvImagePtr cv_ptr;
     try
     {
@@ -121,23 +154,25 @@ public:
 
    Mat im0;
    
-   if(flag==0)
+   if(flag==0)   //to detect
     { 
               
         cv_ptr->image.copyTo(im0); // take im0 as cv_ptr->image
-        frame++;
-        circles=hough(im0);            
+
+        frame++;                                                       //next frame index
+
+        circles=hough(im0, current_altitude);            //find hough circles that are within the radius range prescribed by current_altitude
         
-          if (circles.size()<5) 		//if a lesser no of circles are detected than required call hough again with the next frame
+          if (circles.size()<5) 		//if no of circles detected is lesser than a particular threshold (which is set as 5 here) call hough again with the next frame of the video
            {
              flag=0;         
            }  
          else
           {
-            rect=roi(im0,circles);        //call roi and get rect from Hough circles     
+            rect=roi(im0,circles);        //call function roi to get bounding rectangles of the Hough circles     
    
        
-             if(rect.area()==0)
+             if(rect.area()==0)     //if proper bounding rectangle is not found
                {
                  flag=0;         /*set flag to 0 so that next frame is used for initialization and repeat until a proper bounding rectangle is found from hough*/    
                }                                          
@@ -147,6 +182,7 @@ public:
 
                       //Convert im0 to grayscale
                    Mat im0_gray;
+
                    if (im0.channels() > 1) 
                     {
                      cvtColor(im0, im0_gray, CV_BGR2GRAY);
@@ -157,13 +193,13 @@ public:
                     }
 
                      //Initialize CMT
-                     cmt1.initialize(im0_gray, rect);
+                     cmt1.initialize(im0_gray, rect);     //tracker initialized with the rectangles found from hough circles
     
                      flag=1;
              }
         }
     }
-  else
+  else      //start tracking since detection is achieved
    {
         frame++;
         Mat im;
@@ -186,7 +222,7 @@ public:
             if(cmt1.points_active.size()==0)           //if there's no active point then tracking cannot occur
               {
                    ROS_INFO("\nActive points not found");  
-                   flag=0;     /*set flag to 0 so that next frame is used for initialization and repeat until a proper bounding rectangle is found from hough and atleast 1 active point is found*/    
+                   flag=0;     /*set flag to 0 so that next frame is used for initialization and repeat until a proper bounding rectangle is found from hough AND atleast 1 active point is found*/    
               }                                                       
             else
              {                                       

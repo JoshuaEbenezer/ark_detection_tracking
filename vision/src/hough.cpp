@@ -14,6 +14,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include "std_msgs/String.h"
 #include "std_msgs/Empty.h"
+#include <math.h>
 
 #include"iostream"
 #include<stdio.h>
@@ -22,7 +23,7 @@ using namespace std;
 using namespace cv; 
 
 
-vector<Vec3f> hough(Mat img)
+vector<Vec3f> hough(Mat img, float current_altitude)
 {
 Mat im;
 im=img;
@@ -39,9 +40,11 @@ vector<Vec3f> circles;
     medianBlur(im, cimg1, 5);
     cvtColor(cimg1, cimg, CV_BGR2GRAY);     
 
-  
-    HoughCircles(cimg, circles, CV_HOUGH_GRADIENT, 1, 10,40, 25, 3, 20);      // change the last two parameters
-                                                                             // (min_radius & max_radius) to detect larger circles
+    int min_radius=pow(current_altitude,-1);          //TODO: find relationship bw altitude and min_radius
+    int max_radius=current_altitude;                      //TODO: find relationship bw altitude and max_radius
+
+    HoughCircles(cimg, circles, CV_HOUGH_GRADIENT, 1, 10,40, 25, min_radius, max_radius);      // TODO: change the last two parameters
+                                                                                                                                                               // (min_radius & max_radius) to detect larger/smaller circles
                         
       for( size_t i = 0; i < circles.size(); i++ )
       {
@@ -75,7 +78,7 @@ Rect roi(Mat img, vector<Vec3f> circles)
   centre_of_frame=Point((img.cols)/2.0,(img.rows)/2.0);  //finding centre of image
      ROS_INFO(" %f %f ",centre_of_frame.x,centre_of_frame.y);   
           
-          for(size_t i=0;i<circles.size();i++)
+          for(size_t i=0;i<circles.size();i++)        //finding robot that is furthest from the centre of the frame. This condition (for which robot to track) can be altered.
             {
            
                Vec3f c = circles[i];
